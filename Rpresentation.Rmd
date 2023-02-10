@@ -1,0 +1,389 @@
+---
+title: "Some Statistics With R"
+author: "Federico Dotti"
+date: "2023-02-03"
+output: html_document
+---
+
+## In this document, we explore a series of methods of high importance in statistics (Monte Carlo methods). Lastly, we train a model to predict the stage of ALS (Amyotrophic Lateral Sclerosis) based on a series of biomarkers.  
+
+### [Rejection Sampling](https://en.wikipedia.org/wiki/Rejection_sampling), an example
+
+Rejection sampling is a method whereby we can generate samples from a desired random variable provided that we know its density, and that we already know how to sample from a different distribution whose support contains that of the target random variable.
+
+Consider the triangular distribution with density $f(x) = 2-4\mid x-\frac{1}{2} \mid$ when $x \in (0,1)$ and $f(x) = 0$ otherwise
+
+The density function looks as follows:
+
+```{r}
+triang = function(x) 
+{
+  (2 - 4*abs(x-0.5))*I((x>0)&(x<1))
+}
+
+curve(triang,-2,1,xlab="x",ylab="density")
+
+```
+
+Using a uniform random variable on the interval $(0,1)$ to sample from the triangular density with rejection sampling:
+
+```{r}
+b=optimize(function(x) triang(x),c(0,1),maximum = T)$objective #objective is the value of max, not the argument, using uniform as proposal
+#maximization is done over the interval (0,1)
+
+triangular.AR = function(n)
+{
+  out=NULL
+  while (length(out)<n)
+  {
+    xstar=runif(1)
+    u=runif(1)
+    if (u*b<triang(xstar))
+    {
+      out=c(out,xstar)
+    }
+  }
+  out
+}
+
+triangsim1=triangular.AR(10^4)
+hist(triangsim1,freq=F,nclass=100)
+curve(triang(x),add=T)
+
+```
+
+Now we'll use a Beta(2,2) as the proposal distribution:
+
+```{r}
+b=optimize(function(x) triang(x)/dbeta(x,2,2),c(0,1),maximum = T)$objective #objective is the value of max, not the argument, using uniform as proposal
+#maximization is done over the interval (0,1)
+
+
+triangular.AR2 = function(n)
+{
+  out=NULL
+  while (length(out)<n)
+  {
+    xstar=rbeta(1,2,2)
+    u=runif(1)
+    if (u*b*dbeta(xstar,2,2)<triang(xstar))
+    {
+      out=c(out,xstar)
+    }
+  }
+  out
+}
+
+triangsim2=triangular.AR2(10^4)
+hist(triangsim2,freq=F,nclass=100)
+curve(b*dbeta(x,shape1 = 2,shape2 = 2),add=T) #plot of proposal
+curve(triang(x), add = T, col=2) #plot of desired function
+curve(dbeta(x,shape1 = 2,shape2 = 2),add=T, col=3)
+legend(x = "topright", legend = c("Beta(2,2)", "Scaled Beta", "Triangular"), 
+       lty = c(1,1,1), col = c(3,1,2))
+
+```
+
+### Monte Carlo integration
+
+Any algorithm that repeatedly uses samples from a probability distribution can be called a Monte Carlo method. We can calculate integrals numerically by generating from a random variable whose support includes the domain of integration. We will calculate $$\int_{0}^{\infty}e^{-x^3}dx \approx 0.89298$$
+
+If $X$ is a standard normal random variable and $f(x)=\frac{1}{A(x)}e^{-x^3}$ when $x>0$ and $f(x)=0$ otherwise, where $A(x)$ is the probability density function of $X$, then $$\mathbb{E}[f(X)] = 
+\int_{0}^{\infty}A(x)f(x)dx = \int_{0}^{\infty}A(x)\frac{1}{A(x)}
+e^{-x^3}dx = \int_{0}^{\infty}e^{-x^3}dx$$
+
+We will calculate this expected value numerically by taking multiple samples from $X$, applying the function $f$, and averaging the results.
+
+```{r}
+normgen = function(x)
+{
+  sqrt(2*pi)*exp((x^2)/2)*exp(-x^3)*I(x>0)
+}
+```
+
+```{r}
+normsim = function(n)
+{
+  x=rnorm(n)
+  fx=normgen(x)
+  value=cumsum(fx)/1:n
+  var=cumsum(fx^2)/1:n
+  var=var-(value^2)
+  var=var/1:n
+  out=list(value = value, var = var)
+}
+
+normsim1 = normsim(10^4)
+plot(normsim1$value,type="l",ylim = c(0.6,1.2), xlab = "Sample size",
+     ylab = "estimate") #ylim chosen a posteriori
+lines(1:10^4,normsim1$value+2*sqrt(normsim1$var),type ="l",col=2)
+lines(1:10^4,normsim1$value-2*sqrt(normsim1$var),type ="l",col=2)
+```
+
+We can create a matrix with b rows and n columns, where each row corresponds to an estimate of sample size n. We can use the quantiles (97.5 per cent and 2.5 per cent) to plot variability bands. In this example, the resulting graph will be much smoother because it will be based on 200 simulations rather than just one:
+
+```{r}
+normsimq = function(b,n)
+{
+  out=matrix(NA,b,n)
+  for (i in 1:b)
+  {
+  x=rnorm(n)
+  fx=normgen(x)
+  value=cumsum(fx)/1:n
+  out[i,]=value
+  }
+  out
+
+}
+
+normsimq1 = normsimq(200,10^4)
+upper=rep(NA,10^4)
+middle=rep(NA,10^4)
+lower=rep(NA,10^4)
+for (i in 1:10^4)
+{
+  upper[i]=quantile(normsimq1[,i],probs = 0.975)
+  middle[i]=quantile(normsimq1[,i],probs = 0.5)
+  lower[i]=quantile(normsimq1[,i],probs = 0.025)
+}
+plot(1:10^4,middle,type="l",ylim=c(0.6,1.2),
+     xlab = "Sample size", ylab = "Estimate")
+lines(1:10^4,upper,type="l",col=2)
+lines(1:10^4,lower,type="l",col=2)
+```
+
+
+Now we will calculate the expected value of the distribution that is proportional to $f(x)=e^{-x^2{\sqrt{x}}}\sin^2{(x)}$ where $x>0$ and $f(x)=0$ otherwise, by generating samples from an exponential random variable with $\lambda = 1$, the logic is the same as before.
+
+
+
+```{r}
+prop = function(x) exp(-x^2*(sqrt(x)))*sin(x)^2
+
+curve(prop, 0, 3)
+
+```
+
+
+```{r}
+a=integrate(function(x) exp(-x^2*(sqrt(x)))*sin(x)^2,0,Inf)
+cat("The integral of f over the positive reals is", a$value)
+a=1/a$value
+fun = function(x) a*I(x>0)*exp(-x^2*(sqrt(x)))*sin(x)^2 #Turn our function into a probability density by making it integrate to 1
+nonMCEV=integrate(function(x) x*fun(x),0,Inf)$value #Deterministic calculation of Expected value
+cat("The expexted value calculated with conventional methods", nonMCEV)
+```
+
+```{r}
+importancesam = function(n)
+{
+  val=rexp(n)
+  function2=function(x) a*exp(x-(x^(5/2)))*(sin(x)^2)*x #original function multiplied by x and by the reciprocal of the density of an exponential rv with parameter lambda = 1
+  val2=function2(val)
+  estimate=cumsum(val2)/1:n
+  out=estimate
+}
+
+importancesim = importancesam(10^4)
+plot(importancesim,type="l", ylab = paste("nonMC expected value = ",as.character(round(importancesim[10^4], digits = 4))))
+abline(h=importancesim[10^4],col=2)
+```
+
+### [Bootstrapping](https://en.wikipedia.org/wiki/Bootstrapping_(statistics)) to make inferences about a parameter
+
+The dataset `cats` from the MASS library contains measurements about the body weight (in kilograms) and the heart weight (in grams) of domestic cats. We are interested in knowing whether, on average, male cats have a higher heart weight relative to their bodyweight than female cats. We only have one sample of 144 observations, and we will use bootstrapping (sampling with replacement) to generate 1000 samples of 144 observations to obtain the sampling distribution for the parameter.
+
+```{r}
+library(boot)
+library(MASS)
+head(cats)
+mean(cats$Hwt[cats$Sex=="M"])/mean(cats$Bwt[cats$Sex=="M"])-mean(cats$Hwt[cats$Sex=="F"])/mean(cats$Bwt[cats$Sex=="F"])
+```
+
+We can see that in the original sample the parameter is essentially equal to 0, indicating that there is no difference between the sexes.
+
+```{r}
+theta=function(data,i)
+{
+  d=data[i,]
+  mean(d$Hwt[d$Sex=="M"])/mean(d$Bwt[d$Sex=="M"])-mean(d$Hwt[d$Sex=="F"])/mean(d$Bwt[d$Sex=="F"])
+}
+
+cats.boot=boot(cats,theta,R=1000,strata=cats$Sex) #Use strata if the indices are partitioned (In this case by Sex)
+cats.boot$t0
+plot(cats.boot)
+cats.boot
+boot.ci(cats.boot,conf=0.99)
+```
+
+The bootstrap confidence intervals are symmetric around 0, concordant with our initial estimate.
+
+### Predicting Disease Stage Based on a Series of Biomarkers
+
+ALS (Amyotrophic Lateral Sclerosis) is a neurodegenerative disease that affects the motor neurons that control voluntary muscles until the eventual paralysis and death of the patient. Usually, the prognosis is that the patient will have 3 to 5 years to live after the first time symptoms arise. The data set `sla.csv` was obtained from a database that contains data from patients participating in clinical trials.
+
+The ALSFRS index (Amyotrophic Lateral Sclerosis Functional Rating Scale) scores the patient's ability to function independently. It is based on 10 questions that summarize the patient's ability to perform basic bodily functions (speech, salivation, swallowing, writing by hand, going up a flight of stairs, walking, etc).
+Each question is answered by a whole number between 0 (no function) and 4 (normal function). The patient's score is the sum of the 10 answers. We will train a predictive model to predict a patient's ALSFRS based on their biomarkers (43 independent variables). We will fit two linear models as well as regression trees and choose the winner from each class of model, we'll have the winners compete and select the best model. 
+
+#### Visualizing and Preparing the Data
+
+```{r}
+sla=read.csv("sla.csv")
+str(sla)
+sla$Sex = as.factor(sla$Sex)
+sla$Ethnicity = as.factor(sla$Ethnicity)
+sla$Race = as.factor(sla$Race)
+sla$Onset_Site = as.factor(sla$Onset_Site)
+sum(is.na(sla)) #No missing data, counts both NULL and NA
+#c(mean(sla$ALSFRS_Total),median(sla$ALSFRS_Total))
+plot(table(sla$ALSFRS_Total), xlab = "ALSFRS", ylab = "Frequency")
+abline(v = mean(sla$ALSFRS_Total), col = 2, lwd = 1)
+abline(v = median(sla$ALSFRS_Total), col = 3, lwd = 1)
+legend(x = "topleft", legend = c(paste("Mean = ", round(mean(sla$ALSFRS_Total), 4)),
+                                       paste("Median = ", median(sla$ALSFRS_Total))), 
+       lty = c(1,1), col = c(2,3), lwd = c(1,1), cex = 1.2)
+
+
+
+
+#We get rid of the first column, which is the observation index
+sla1=sla[,-1]
+
+indices1 = sample(1:nrow(sla1),12000)
+slaTrain1=sla1[indices1,]
+slaTest1=sla1[-indices1,]
+
+indices2 = sample(1:nrow(slaTrain1),8000)
+slaTrain2=slaTrain1[indices2,]
+slaTest2=slaTrain1[-indices2,]
+
+#Now we prepare the model matrices for LASSO regression
+
+#x.train = model.matrix(~.,data=slaTrain2[,-1]) #We get rid of dependent variable
+#x.test = model.matrix(~.,data=slaTest1[,-1])
+```
+
+
+
+```{r, include = FALSE}
+# #Now we train the LASSO models and choose the best one with a built-in cross validation function
+# library(lars)
+# 
+# #The lars function chooses a sequence of lambdas
+# 
+# lasso1=lars(x.train,slaTrain2$ALSFRS_Total)
+# 
+# #We use built-in cross validation function when fitting to get the best lasso model
+# 
+# lasso.cv=cv.lars(x.train,slaTrain2$ALSFRS_Total,type="lasso")
+# 
+# choice = lasso.cv$index[which.min(lasso.cv$cv)] #We choose the best lasso model
+# abline(v = choice, col = 2, lwd = 2)
+# legend(x = "top", paste("MSE = ", round(min(lasso.cv$cv), 4), sep = ""),
+#        lty = 1, col = 2, lwd = 2, cex = 1)
+```
+
+Now we train the linear models, first a full model and then we iteratively remove independent variables until arriving at a reduced model, based on AIC.
+
+```{r}
+lmTrain2=lm(slaTrain2$ALSFRS_Total~.,data=slaTrain2) #Fit full model
+lmTrain2b = step(lmTrain2, direction = "backward", trace=1 ) #Get reduced model
+```
+
+We will calculate the MSE of both linear models using the data in `slaTest2` and choose the one that fares better.
+
+```{r message=FALSE}
+predict.lmTrain2=predict(lmTrain2,newdata = slaTest2)
+predict.lmTrain2b=predict(lmTrain2b,newdata = slaTest2)
+mse.lmTrain2=mean((predict.lmTrain2-slaTest2$ALSFRS_Total)^2)
+mse.lmTrain2b=mean((predict.lmTrain2b-slaTest2$ALSFRS_Total)^2)
+
+MSEtable = list(MSE = c(mse.lmTrain2, mse.lmTrain2b), NAMES = c("MSE of full lm is", 
+                                                                 "MSE of reduced lm is"))
+paste(MSEtable$NAMES, MSEtable$MSE)
+```
+
+
+```{r, include = FALSE}
+# predictLASSOfinal = predict(lasso1,x.test,mode="fraction",s=choice)
+# mseLASSOfinal = mean((predictLASSOfinal$fit-slaTest1$ALSFRS_Total)^2)
+# 
+# head(data.frame(slaTest1$ALSFRS_Total, predictLASSOfinal$fit), n = 15)
+```
+
+This chunk prints out the winning model (in this case among full linear model and reduced linear model).
+
+```{r}
+
+#It is important that the model names match the variable names that you used for them
+
+input = list(MODELS = c("lmTrain2", "lmTrain2b"), MSE = c(mse.lmTrain2, mse.lmTrain2b))
+bestmodel = function (myinput)
+{
+  paste("The winning model is", 
+        myinput$MODELS[which.min(myinput$MSE)])
+}
+bestmodel(input)
+```
+
+We fit the regression tree on `slaTrain2` and prune it on `slaTest2`.
+
+```{r}
+library(tree)
+
+tree1 = tree(ALSFRS_Total~.,data=slaTrain2,control=tree.control(nobs=nrow(slaTrain2),
+                                                                minsize=2,mindev = 0.001))
+prune.tree1 = prune.tree(tree1, newdata = slaTest2)
+
+J = prune.tree1$size[prune.tree1$dev==min(prune.tree1$dev)]
+treeBEST = prune.tree(tree1, best = J)
+plot(prune.tree1) #x-axis shows number of terminal nodes, we chose one that minimizes the deviance, top part of x-axis shows a "tuning constant" used at each size to find the best tree
+abline(v = J, col = 2)
+legend(x = "topright", legend = paste("J =", J, "terminal nodes"), col = 2, lty = 1)
+
+
+
+#head(data.frame(slaTest1$ALSFRS_Total, predict.treeBEST), n = 15)
+
+
+```
+
+We test the best linear model and the best tree on `slaTest1` and choose the winner, we print the first 10 predictions as well.
+
+```{r}
+bestPredict = function(myinput) #returns "modelname", input should look like
+#  list(MODELS = c("lmTrain2", "lmTrain2b"), MSE = c(mse.lmTrain2, mse.lmTrain2b))
+{
+  myinput$MODELS[which.min(myinput$MSE)]
+}
+
+predict.lmBEST = predict(get(bestPredict(input)), newdata = slaTest1)
+mse.lmBEST = mean((predict.lmBEST-slaTest1$ALSFRS_Total)^2)
+
+predict.treeBEST = predict(treeBEST, newdata = slaTest1)
+mse.treeBEST = mean((predict.treeBEST-slaTest1$ALSFRS_Total)^2)
+
+MSEtableFinal = list(MSE = c(mse.treeBEST, mse.lmBEST), NAMES = c("MSE of best tree is", 
+                                                                 "MSE of best lm is"))
+paste(MSEtableFinal$NAMES, MSEtableFinal$MSE)
+
+
+input2 = list(MODELS = c(bestPredict(input), "treeBEST"), 
+              MSE = c(mse.lmBEST), mse.treeBEST)
+
+
+if (bestPredict(input2) == "treeBEST")
+{
+  head(data.frame(slaTest1$ALSFRS_Total, predict.treeBEST), n = 10)
+} else
+{
+  head(data.frame(slaTest1$ALSFRS_Total, predict.lmBEST), n = 10)
+}
+```
+
+
+
+
+
+

@@ -9,7 +9,7 @@ Click `Rpresentation.html`, once there, right click "Raw" and then "Save link as
 ## To Reproduce This Presentation on Your PC:
 
 1. Download `Rpresentation.Rmd` and `sla.csv` into the same folder.
-2. Set the folder where the files are to be found as working directory.
+2. Set the folder where the files are to be found as the working directory.
 3. Open `Rpresentation.Rmd` and Knit it to HTML.
   1. Alternatively use Ctrl+Alt+R if you'd like to run the entire program in your R environment.
  
